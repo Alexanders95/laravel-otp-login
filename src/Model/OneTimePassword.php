@@ -3,9 +3,10 @@
 namespace tpaksu\LaravelOTPLogin;
 
 use App\User;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Hash;
-use Carbon\Carbon;
+use tpaksu\LaravelOTPLogin\Factories\ServiceFactory;
 
 class OneTimePassword extends Model
 {
@@ -53,24 +54,16 @@ class OneTimePassword extends Model
     public function createOTP($ref)
     {
         $this->discardOldPasswords();
-        $otp = $this->OTPGenerator();
-
-        $otp_code = $otp;
-
-        if (config("otp.encode_password", false)) {
-            $otp_code = Hash::make($otp);
-        }
-
         $this->update(["status" => "waiting"]);
 
-        $this->oneTimePasswordLogs()->create([
-            'user_id' => $this->user->id,
-            'otp_code' => $otp_code,
-            'refer_number' => $ref,
-            'status' => 'waiting',
-        ]);
-
-        return $otp;
+        return tap($this->OTPGenerator(), function ($otp) use ($ref) {
+            $this->oneTimePasswordLogs()->create([
+                'user_id' => $this->user->id,
+                'otp_code' => $otp,
+                'refer_number' => $ref,
+                'status' => 'waiting',
+            ]);
+        });
     }
 
     private function ReferenceNumber()
@@ -82,7 +75,14 @@ class OneTimePassword extends Model
     private function OTPGenerator()
     {
         $number = strval(rand(100000000, 999999999));
-        return substr($number, 0, config("otp.otp_digit_length", 4));
+        $code = substr($number, 0, config("otp.otp_digit_length", 4));
+
+        if (config("otp.encode_password", false)) {
+            $code = Hash::make($code);
+        }
+
+        return $code;
+
     }
 
     public function discardOldPasswords()

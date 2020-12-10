@@ -2,8 +2,7 @@
 
 namespace tpaksu\LaravelOTPLogin\Services;
 
-use App\User;
-use tpaksu\LaravelOTPLogin\ServiceInterface;
+use tpaksu\LaravelOTPLogin\Contracts\ServiceInterface;
 
 /**
  * BioTekno SMS service handler
@@ -64,24 +63,25 @@ class BioTekno implements ServiceInterface
      * @param string $ref
      * @return boolean
      */
-    public function sendOneTimePassword(User $user, $otp, $ref)
+    public function sendOneTimePassword($user, $otp, $ref)
     {
         // phone numbers need to be starting without a leading zero in this service
         // extract the phone number from the user
         $user_phone = data_get($user, $this->phone_column, false);
 
         // if phone number doesn't exist, return failed
-        if (!$user_phone) return false;
+        if (!$user_phone) {
+            return false;
+        }
 
         try {
-
             // prepare the request URL
             $url = 'http://www.biotekno.biz:8080/SMS-Web/HttpSmsSend?' .
-                'Username=' . $this->username .
-                '&Password=' . $this->password .
-                '&Msisdns=' . $user_phone .
-                '&TransmissionID=' . $this->transmission_id .
-                '&Messages=' . urlencode(iconv("UTF-8", "ASCII//TRANSLIT", str_replace(":password", $otp, $this->message)));
+            'Username=' . $this->username .
+            '&Password=' . $this->password .
+            '&Msisdns=' . $user_phone .
+            '&TransmissionID=' . $this->transmission_id .
+            '&Messages=' . urlencode(iconv("UTF-8", "ASCII//TRANSLIT", str_replace(":password", $otp, $this->message)));
 
             // GET the response
             $results = file_get_contents($url);

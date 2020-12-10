@@ -13,6 +13,13 @@ class CreateOtpLogsTable extends Migration
      */
     public function up()
     {
+        /**
+         * OTP Password Generation History
+         *
+         * @param   Blueprint  $table  Schema builder
+         *
+         * @return  void
+         */
         Schema::create('one_time_password_logs', function (Blueprint $table) {
             $table->increments('id');
             $table->unsignedInteger("user_id")->index();
@@ -22,6 +29,13 @@ class CreateOtpLogsTable extends Migration
             $table->timestamps();
         });
 
+        /**
+         * Add the foreign key reference of user_id
+         *
+         * @param   Blueprint  $table  Schema builder
+         *
+         * @return  void
+         */
         Schema::table('one_time_password_logs', function (Blueprint $table) {
             $table->foreign('user_id') ->references('id')->on('users')->onDelete('cascade');
         });
@@ -34,6 +48,9 @@ class CreateOtpLogsTable extends Migration
      */
     public function down()
     {
+        /**
+         * Drop the OTP table if exists
+         */
         Schema::dropIfExists('one_time_password_logs');
     }
 }

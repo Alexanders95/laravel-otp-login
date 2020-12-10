@@ -1,10 +1,12 @@
 <?php
 
-namespace tpaksu\LaravelOTPLogin;
+namespace tpaksu\LaravelOTPLogin\Middleware;
 
 use Closure;
-use \Carbon\Carbon;
-use Illuminate\Foundation\Auth\RedirectsUsers;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Str;
+use tpaksu\LaravelOTPLogin\Models\OneTimePassword;
 
 class LoginMiddleware
 {
@@ -24,110 +26,93 @@ class LoginMiddleware
      */
     public function handle($request, Closure $next)
     {
-        if ($this->debug) logger("entered middleware");
-        if ($this->debug) logger($request->route()->computedMiddleware);
+        $this->debugPoint("entered middleware");
+        $this->debugPoint($request->route()->computedMiddleware);
 
         // check if the request should be bypassed, or the request doesn't have authentication required
         if ($this->bypassing() || in_array("auth", $request->route()->computedMiddleware) == false) {
-            if ($this->debug) logger("bypassing");
+            $this->debugPoint("bypassing");
             return $next($request);
         }
 
         // get the current route
         $routeName = $request->route()->getName();
-        if ($this->debug) logger("routename $routeName");
+        $this->debugPoint("routename $routeName");
 
         // check if the requested route should be checked against OTP verification status
         // and also for the user login status
         // this is needed for skipping the OTP and login routes
 
-        if ($this->willCheck($routeName)) {
-            if ($this->debug) logger("willcheck = true");
-
+        if ($this->shouldCheck($routeName)) {
+            $this->debugPoint("shouldCheck = true");
             // get the logged in user
-            $user = \Auth::user();
+            $user = Auth::user();
 
             // check for user OTP request in the database
             $otp = $this->getUserOTP($user);
 
-            // define the flag for refreshing the OTP verification code
-            $needsRefresh = false;
-
             // a record exists for the user in the database
             if ($otp instanceof OneTimePassword) {
-
-                if ($this->debug) logger("otp found");
-
+                $this->debugPoint("otp found");
                 // if has a pending OTP verification request
                 if ($otp->status == "waiting") {
-
                     // check timeout
                     if ($otp->isExpired()) {
-                        if ($this->debug) logger("otp is expired");
-
+                        $this->debugPoint("otp is expired");
                         // expired. expire the cookie if exists
                         $this->createExpiredCookie();
-
                         //  redirect to login page
                         return $this->logout($otp);
                     } else {
-                        if ($this->debug) logger("otp is valid, but status is waiting");
-
+                        $this->debugPoint("otp is valid, but status is waiting");
                         // still valid. redirect to login verify screen
                         return redirect(route("otp.view"));
                     }
                 } else if ($otp->status == "verified") {
-                    if ($this->debug) logger("otp is verified");
-
+                    $this->debugPoint("otp is verified");
                     // verified request. go forth.
                     $response = $next($request);
                     if ($response->status() == 419) {
-
-                        // timeout occured
-                        if ($this->debug) logger("timeout occured");
-
+                        // csrf token timed out
+                        $this->debugPoint("timeout occured");
                         // expire the cookie if exists
                         $this->createExpiredCookie();
-
                         // redirect to login screen
                         return $this->logout($otp);
                     } else {
-                        if ($this->debug) logger("otp is valid, go forth");
-
+                        $this->debugPoint("otp is valid, go forth");
                         // create a cookie that will expire in one year
                         $this->createCookie($user->id);
-
                         // continue to next request
                         return $response;
                     }
                 } else {
                     // invalid status, needs to login again.
-                    if ($this->debug) logger("invalid status");
-
+                    $this->debugPoint("invalid status");
                     // expire the cookie if exists
                     $this->createExpiredCookie();
-
                     // redirect to login page
                     return $this->logout($otp);
                 }
             } else {
-                if ($this->debug) logger("otp doesn't exist");
+                $this->debugPoint("otp doesn't exist");
 
                 // creating a new OTP login session
                 $otp = OneTimePassword::create([
                     "user_id" => $user->id,
                     "status" => "waiting",
                 ]);
-                if ($this->debug) logger("created otp for {$user->id}");
+
+                $this->debugPoint("created otp for {$user->id}");
 
                 // send the OTP to the user
                 if ($otp->send() == true) {
-                    if ($this->debug) logger("otp send succeeded");
+                    $this->debugPoint("otp send succeeded");
 
                     // redirect to OTP verification screen
                     return redirect(route('otp.view'));
                 } else {
-                    if ($this->debug) logger("otp send failed");
+                    $this->debugPoint("otp send failed");
 
                     // otp send failed, expire the cookie if exists
                     $this->createExpiredCookie();
@@ -137,11 +122,11 @@ class LoginMiddleware
                 }
             }
         } else {
-            if ($this->debug) logger("willcheck failed");
-            // if an active session doesn't exist, but a cookie is present
-            if (\Auth::guest() && $this->hasCookie()) {
+            $this->debugPoint("willcheck failed");
 
-                if ($this->debug) logger("if user hasn't logged in and cookie exists, delete cookie");
+            // if an active session doesn't exist, but a cookie is present
+            if (Auth::guest() && $this->hasCookie()) {
+                $this->debugPoint("if user hasn't logged in and cookie exists, delete cookie");
 
                 // get the user ID from cookie
                 $user_id = $this->getUserIdFromCookie();
@@ -154,10 +139,9 @@ class LoginMiddleware
             }
         }
 
-        if ($this->debug) logger("returning next request");
+        $this->debugPoint("returning next request");
 
         // continue processing next request.
-
         return $next($request);
     }
 
@@ -168,7 +152,8 @@ class LoginMiddleware
      */
     private function bypassing()
     {
-        return \Session::has("otp_service_bypass") && \Session::get("otp_service_bypass", false);
+        return Session::has("otp_service_bypass")
+         & Session::get("otp_service_bypass", false);
     }
 
     /**
@@ -177,9 +162,11 @@ class LoginMiddleware
      * @param string $routeName
      * @return boolean
      */
-    private function willCheck($routeName)
+    private function shouldCheck($routeName)
     {
-        return \Auth::check() && config("otp.otp_service_enabled", false) && !in_array($routeName, ['otp.view', 'otp.verify', 'logout']);
+        return Auth::check()
+        && config("otp.otp_service_enabled", false)
+        && !in_array($routeName, ['otp.view', 'otp.verify', 'logout']);
     }
 
     /**
@@ -202,7 +189,7 @@ class LoginMiddleware
     private function logout($otp)
     {
         $otp->discardOldPasswords();
-        \Auth::logout();
+        Auth::logout();
         return redirect('/');
     }
 
@@ -213,7 +200,8 @@ class LoginMiddleware
      */
     private function hasCookie()
     {
-        return isset($_COOKIE["otp_login_verified"]) && starts_with($_COOKIE["otp_login_verified"], 'user_id_');
+        return isset($_COOKIE["otp_login_verified"])
+        && Str::startsWith($_COOKIE["otp_login_verified"], 'user_id_');
     }
 
     /**
@@ -247,5 +235,15 @@ class LoginMiddleware
     private function getUserIdFromCookie()
     {
         return intval(str_replace("user_id_", "", $_COOKIE["otp_login_verified"]));
+    }
+
+    /**
+     *
+     */
+    private function debugPoint($str)
+    {
+        if ($this->debug) {
+            logger($str);
+        }
     }
 }
